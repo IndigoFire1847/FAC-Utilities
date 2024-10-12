@@ -535,7 +535,7 @@ async def poll(interaction: discord.Interaction, question: str, option1: str, op
 
 @client.tree.command(description="Get the source code for the bot")
 async def code(interaction: discord.Interaction):
-  await interaction.response.send_message("The link to my source code is here: 
+  await interaction.response.send_message("The link to my source code is here: https://github.com/IndigoFire1847/FAC-Utilities/tree/main")
 
 # Handler for poll command if user doesn't have permissions
 
