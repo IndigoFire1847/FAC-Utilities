@@ -148,7 +148,7 @@ async def periodic_save():
     save_levels(levels)
 
 # Define the ID of the logging channel
-LOGGING_CHANNEL_ID = 1292447543091007550  # Replace with the actual ID of your logging channel
+LOGGING_CHANNEL_ID = # Insert your own logging channel ID
 
 # Utility function to get the logging channel
 async def get_logging_channel(guild):
@@ -548,28 +548,28 @@ async def poll_error(interaction: discord.Interaction, error):
 
 @kick.error
 async def kick_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.error.MissingPermissions):
+  if isinstance(error, app_commands.errors.MissingPermissions):
     await interaction.response.send_message("You don't have permission to kick users", ephemeral = True)
 
 # Ban command handler if user doesn't have permissions
 
 @ban.error
 async def ban_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.error.MissingPermissions):
+  if isinstance(error, app_commands.errors.MissingPermissions):
     await interaction.response.send_message("You don't have permission to ban users", ephemeral = True)
 
 # Unban handler if user doesn't have permissions
 
 @unban.error
 async def unban_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.error.MissingPermissions):
+  if isinstance(error, app_commands.errors.MissingPermissions):
     await interaction.response.send_message("You don't have permission to unban users", ephemeral = True)
 
 # Warn handler if user doesn't have permission
 
 @warn.error
 async def warn_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.error.MissingPermissions):
+  if isinstance(error, app_commands.errors.MissingPermissions):
     await interaction.response.send_message("You don't have permission to warn users", ephemeral = True)
 
 
