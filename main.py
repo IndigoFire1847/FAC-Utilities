@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 intents = discord.Intents.default()
 intents.message_content = True
 
-OWNER_ID = 683313053605167185
+OWNER_ID = # insert your own discord user id here
 
 client = commands.Bot(command_prefix='-', intents=intents)
 
@@ -25,7 +25,7 @@ async def on_ready():
   except Exception as e:
     print(e)
 
-# File where levels and XP are stored
+# File where levels and XP are stored. Change role names and level requirement as needed
 LEVEL_FILE = 'levels.json'
 ROLE_LEVELS = {
   5: "Level 5",
@@ -85,8 +85,6 @@ async def on_message(message):
         await message.channel.send(f"🎉 {message.author.mention} leveled up to level {leveled_up}!")
 
     await client.process_commands(message)
-
-### Slash Commands ###
 
 # Function to check and assign roles based on level
 async def check_and_assign_role(user, level, guild):
@@ -156,7 +154,7 @@ LOGGING_CHANNEL_ID = 1292447543091007550  # Replace with the actual ID of your l
 async def get_logging_channel(guild):
     return discord.utils.get(guild.text_channels, id=LOGGING_CHANNEL_ID)
 
-### EVENT LISTENERS ###
+# EVENT LISTENERS 
 
 # Log message deletions
 @client.event
@@ -299,11 +297,15 @@ async def on_guild_channel_update(before, after):
             embed.add_field(name="New Name", value=after.name, inline=False)
         await log_channel.send(embed=embed)
 
+# Ping Command
+
 @client.tree.command(description="gets the bots ping!")
 async def ping(interaction: discord.Interaction):
     embed = discord.Embed(title="ARL Bot ping")
     embed.add_field(name="Bot ping", value=f"{round(client.latency * 1000)}ms")
     await interaction.response.send_message(embed=embed, ephemeral = True)
+
+# Give role command
 
 @client.tree.command(description = "give a user a role")
 @app_commands.checks.has_permissions(manage_roles=True)
@@ -312,6 +314,8 @@ async def addrole(interaction: discord.Interaction, member: discord.Member, role
     await member.add_roles(role)
     await interaction.response.send_message(f"{role} was given to {member.mention}")
     await member.send(f"you were given {role} by {interaction.user}")
+
+# Remove role command
 
 @client.tree.command(description = "remove a role from a user")
 @app_commands.checks.has_permissions(manage_roles=True)
@@ -324,9 +328,12 @@ async def removerole(interaction: discord.Interaction, member: discord.Member, r
     else:
         await interaction.response.send_message(f"Either the role **{role}** doesn't exist, or {member} doesn't have it.", ephemeral=True)
 
+# FsHub command (Change URL to your own airline)
 @client.tree.command(description="Recieve the link to our FsHub airline")
 async def fshub(interaction: discord.Interaction):
      await interaction.response.send_message("The link to our FsHub airline is https://fshub.io/airline/FCA/overview", ephemeral=True)   
+
+# User info Command
 
 @client.tree.command(description = "get the info of a user")
 @app_commands.describe(member = "Which user am i getting the info for?")
@@ -342,6 +349,8 @@ async def userinfo(interaction: discord.Interaction, member: discord.Member):
                         value= f"their id is {member.id}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+# Role delete command
+
 @client.tree.command(description="Remove a role")
 @app_commands.checks.has_permissions(manage_roles=True)
 @app_commands.describe(role = "what role am i deleting?", reason = "Why am i deleting this role")
@@ -355,6 +364,8 @@ async def delrole(interaction: discord.Interaction, role: discord.Role, reason: 
 
     await role.delete()
     await interaction.response.send_message(f"Role '{role}' removed successfully because {reason}", ephemeral=True)
+
+# Kick command
 
 @client.tree.command(description="kick a user")
 @app_commands.checks.has_permissions(kick_members=True)
@@ -374,6 +385,8 @@ async def kick(interaction: discord.Interaction, user: discord.User, reason:str)
     await interaction.response.send_message('I do not have permission' 
     'to kick this user', ephemeral=True)
 
+# Ban command
+
 @client.tree.command(description="ban a user")
 @app_commands.checks.has_permissions(ban_members=True)
 @app_commands.describe(user = "Who am i banning?", reason = "Why am i banning them?")
@@ -392,6 +405,8 @@ async def ban(interaction: discord.Interaction, user: discord.User, reason:str):
     await interaction.response.send_message('I do not have permission' 
     'to ban this user', ephemeral=True)
 
+# Unban command
+
 @client.tree.command(description="unban a user")
 @app_commands.describe(user = "who am i unbanning?", reason = "why am i unbanning them?")
 @app_commands.checks.has_permissions(ban_members=True)
@@ -407,6 +422,8 @@ async def unban(interaction: discord.Interaction, user: discord.User, reason:str
         await interaction.response.send_message('I do not have permission' 
 'to ban this user', ephemeral=True)
 
+# Warm command (not a moderation command)
+
 @client.tree.command(description="warm a user")
 @app_commands.describe(user ="Who am i warming")
 @app_commands.checks.has_permissions(manage_messages=True)
@@ -414,13 +431,16 @@ async def warm(interaction: discord.Interaction, user: discord.User):
   await interaction.response.send_message(f"warmed {user.mention}")
   await user.send(f"You were warmed in FAC by {interaction.user}")
 
-@client.tree.command(description="warn a user")
+# Warn command (is a moderation command)
+
 @app_commands.describe(user = "who should i warn?", reason = "Why am i warning them?")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def warn(interaction: discord.Interaction, user: discord.User, reason: str):
     await interaction.response.send_message(f'I have warned {user} with the reason' 
     f' {reason}', ephemeral = True)
     await user.send(f"you were warned in FAC for {reason}")
+
+# Purge command
 
 @client.tree.command(description="delete a specified amount of messages in a channel")
 @app_commands.checks.has_permissions(manage_messages=True)
@@ -437,6 +457,8 @@ async def purge(interaction: discord.Interaction, amount: int):
   else:
     await interaction.response.send_message("This command only works in a text channel."
                                             , ephemeral=True)
+
+# bot shutdown command
 
 @client.tree.command(name="shutdown", description="Shuts down the bot.")
 async def shutdown(interaction: discord.Interaction):
@@ -469,7 +491,7 @@ async def set_status(interaction: discord.Interaction, status: str):
         await interaction.response.send_message("You do not have permission to use this"
                                                 "command.", ephemeral=True)
 
-### Slowmode Command ###
+# Slowmode Command 
 
 @client.tree.command(name="slowmode", description="Set a slowmode delay in a channel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -489,6 +511,8 @@ async def slowmode_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.errors.MissingPermissions):
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
 
+# Poll command
+
 @client.tree.command(description="create a poll")
 @app_commands.describe(question = "What am i making a poll about?", option1 = "What is your first option?", option2 = "what is your second option?", option3 = "What is your third option")
 @app_commands.checks.has_permissions(manage_messages=True)
@@ -507,10 +531,46 @@ async def poll(interaction: discord.Interaction, question: str, option1: str, op
         await message.add_reaction('1️⃣')
         await message.add_reaction('2️⃣')
 
+# Provides link to this page
+
+@client.tree.command(description="Get the source code for the bot")
+async def code(interaction: discord.Interaction):
+  await interaction.response.send_message("The link to my source code is here: 
+
+# Handler for poll command if user doesn't have permissions
+
 @poll.error
 async def poll_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.errors.MissingPermissions):
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+
+# Kick command handler if user doesn't have permissions
+
+@kick.error
+async def kick_error(interaction: discord.Interaction, error):
+  if isinstance(error, app_commands.error.MissingPermissions):
+    await interaction.response.send_message("You don't have permission to kick users", ephemeral = True)
+
+# Ban command handler if user doesn't have permissions
+
+@ban.error
+async def ban_error(interaction: discord.Interaction, error):
+  if isinstance(error, app_commands.error.MissingPermissions):
+    await interaction.response.send_message("You don't have permission to ban users", ephemeral = True)
+
+# Unban handler if user doesn't have permissions
+
+@unban.error
+async def unban_error(interaction: discord.Interaction, error):
+  if isinstance(error, app_commands.error.MissingPermissions):
+    await interaction.response.send_message("You don't have permission to unban users", ephemeral = True)
+
+# Warn handler if user doesn't have permission
+
+@warn.error
+async def warn_error(interaction: discord.Interaction, error):
+  if isinstance(error, app_commands.error.MissingPermissions):
+    await interaction.response.send_message("You don't have permission to warn users", ephemeral = True)
 
 
 client.run(Your Token Here)
