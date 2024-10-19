@@ -3,299 +3,254 @@ import os
 import sys
 import json
 import random
-from datetime import datetime
+import requests
+import asyncio
+import time
 
+from collections import defaultdict
+from datetime import datetime
 from discord import app_commands
+from discord.utils import get
 from discord.ext import commands, tasks
 
 intents = discord.Intents.default()
 intents.message_content = True
 
-OWNER_ID = # insert your own discord user id here
+OWNER_ID = 683313053605167185 # replace with your ID
 
 client = commands.Bot(command_prefix='-', intents=intents)
+WEATHERKEY = # your weather key here (for the weather command, can be taken out)
+BASE_URL = #  (Insert your url for your weather API, again optional)
+TOKEN = # Place your bots key here
+
 
 @client.event
 async def on_ready():
   print("ready")
-  periodic_save.start()
   try:
     synced = await client.tree.sync()
     print(f"synced {len(synced)} command(s)")
   except Exception as e:
     print(e)
 
-# File where levels and XP are stored. Change role names and level requirement as needed
-LEVEL_FILE = 'levels.json'
-ROLE_LEVELS = {
-  5: "Level 5",
-  10:"Level 10",
-  15: "Level 15",
-}
 
-# Load or create the levels JSON file
-def load_levels():
-    try:
-        with open(LEVEL_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
 
-def save_levels(level_data):
-    with open(LEVEL_FILE, 'w') as f:
-        json.dump(level_data, f, indent=4)
+@client.event
+async def on_member_join(member):
+    # Define the role ID (more reliable than role name)
+    role_id = 1234567891011121314  # Replace with the actual role ID
 
-# Load existing levels and XP
-levels = load_levels()
+    # Get the role object using the role ID
+    role = member.guild.get_role(role_id)
 
-# Utility function to calculate level based on XP
-def calculate_level(xp):
-    return int((xp // 100) ** 0.5)
+    if role is not None:
+        # Add the role to the member
+        await member.add_roles(role)
+        print(f"Assigned {role.name} to {member.display_name}")
+    else:
+        print(f"Role with ID {role_id} not found.")
 
-# Add XP to a user
-def add_xp(user_id, xp_amount):
-    user_id = str(user_id)
+# Load or create leveling data
+if not os.path.exists("levels.json"):
+    with open("levels.json", "w") as f:
+        json.dump({}, f)
 
-    # Create a new entry if the user doesn't have one
-    if user_id not in levels:
-        levels[user_id] = {'xp': 0, 'level': 1}
+# Load the leveling data
+def load_data():
+    with open("levels.json", "r") as f:
+        return json.load(f)
 
-    # Add XP
-    levels[user_id]['xp'] += xp_amount
-    new_level = calculate_level(levels[user_id]['xp'])
+# Save the leveling data
+def save_data(data):
+    with open("levels.json", "w") as f:
+        json.dump(data, f, indent=4)
 
-    # Check for level up
-    if new_level > levels[user_id]['level']:
-        levels[user_id]['level'] = new_level
-        return new_level  # Return the new level to indicate the user leveled up
+# Helper function to add XP
+def add_xp(user_id, xp_to_add):
+    data = load_data()
+    if str(user_id) not in data:
+        data[str(user_id)] = {"xp": 0, "level": 1}
 
-    save_levels(levels)
-    return None  # No level up
+    data[str(user_id)]["xp"] += xp_to_add
 
-# Cooldown to prevent spamming for XP
+    # Level up if XP threshold is reached
+    current_xp = data[str(user_id)]["xp"]
+    current_level = data[str(user_id)]["level"]
+    xp_needed = 5 * (current_level ** 2) + 50 * current_level + 100
+
+    if current_xp >= xp_needed:
+        data[str(user_id)]["level"] += 1
+        data[str(user_id)]["xp"] = current_xp - xp_needed
+        return True, data[str(user_id)]["level"]
+    else:
+        save_data(data)
+        return False, None
+
+# Assign roles when users reach specific levels
+async def assign_roles(member, new_level):
+    roles_to_assign = {
+        5: "Level 5", # change to your level roles (can add more if needed)
+        10: "Level 10",
+        15: "Level 15"
+    }
+
+    guild_roles = {role.name: role for role in member.guild.roles}
+
+    for level, role_name in roles_to_assign.items():
+        if new_level >= level and role_name in guild_roles:
+            role = guild_roles[role_name]
+            if role not in member.roles:
+                await member.add_roles(role)
+                await member.send(f"Congrats! You've been given the **{role_name}** role for reaching level {level}!")
+
+### Event Listener for Message Events ###
 @client.event
 async def on_message(message):
     if message.author.bot:
-        return  # Ignore bot messages
+        return
 
-    xp_to_add = random.randint(15, 25)  # Random XP for each message
-    leveled_up = add_xp(message.author.id, xp_to_add)
+    # Add random XP for each message sent
+    xp_to_add = random.randint(5, 15)
+    leveled_up, new_level = add_xp(message.author.id, xp_to_add)
 
+    # If the user leveled up, send a message and assign roles
     if leveled_up:
-        await message.channel.send(f"🎉 {message.author.mention} leveled up to level {leveled_up}!")
+        await message.channel.send(f"🎉 {message.author.mention} has reached level {new_level}!")
+        await assign_roles(message.author, new_level)
 
-    await client.process_commands(message)
+    await client.process_commands(message)  # Process other bot commands
 
-# Function to check and assign roles based on level
-async def check_and_assign_role(user, level, guild):
-    # Check if the user has hit a level that requires a role
-    for role_level, role_name in ROLE_LEVELS.items():
-        if level == role_level:
-            # Find the role in the guild by name
-            role = discord.utils.get(guild.roles, name=role_name)
-            if role and role not in user.roles:
-                await user.add_roles(role)
-                await user.send(f"Congratulations! You've been assigned the role **{role_name}** for reaching level {level}!")
-                return  # Role assigned, exit function
+### Command to Check User Level ###
+@client.tree.command(name="level", description="Check your current level and XP")
+async def level(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    data = load_data()
 
-# Command for checking a user's level and XP
-@client.tree.command(name="level", description="Check your level and XP")
-async def level(interaction: discord.Interaction, member: discord.Member = None):
-    member = member or interaction.user
-    user_id = str(member.id)
-
-    if user_id in levels:
-        xp = levels[user_id]['xp']
-        level = levels[user_id]['level']
-        await interaction.response.send_message(f"{member.display_name} is currently level {level} with {xp} XP.")
+    if user_id not in data:
+        await interaction.response.send_message("You don't have any XP yet!")
     else:
-        await interaction.response.send_message(f"{member.display_name} has no XP yet.")
+        xp = data[user_id]["xp"]
+        level = data[user_id]["level"]
+        await interaction.response.send_message(f"{interaction.user.mention}, you are at **level {level}** with **{xp} XP**!")
 
-# Command for displaying a leaderboard of top users by level
-@client.tree.command(name="leaderboard", description="Display the top 10 users by level")
+### Command to Check Another User's Level ###
+@client.tree.command(name="level_of", description="Check another user's level and XP")
+async def level_of(interaction: discord.Interaction, member: discord.Member):
+    user_id = str(member.id)
+    data = load_data()
+
+    if user_id not in data:
+        await interaction.response.send_message(f"{member.display_name} doesn't have any XP yet!")
+    else:
+        xp = data[user_id]["xp"]
+        level = data[user_id]["level"]
+        await interaction.response.send_message(f"{member.display_name} is at **level {level}** with **{xp} XP**!")
+
+### Command to Show Leaderboard ###
+@client.tree.command(name="leaderboard", description="Show the top 10 users with the highest levels")
 async def leaderboard(interaction: discord.Interaction):
-    sorted_users = sorted(levels.items(), key=lambda x: x[1]['xp'], reverse=True)[:10]  # Top 10 users
-    leaderboard_text = "\n".join([f"<@{user_id}>: Level {data['level']} ({data['xp']} XP)" for user_id, data in sorted_users])
+    data = load_data()
+    sorted_users = sorted(data.items(), key=lambda x: (x[1]['level'], x[1]['xp']), reverse=True)[:10]
 
-    embed = discord.Embed(title="🏆 Leaderboard", description=leaderboard_text, color=discord.Color.gold())
-    await interaction.response.send_message(embed=embed)
+    leaderboard_msg = "**Top 10 Users by Level:**\n"
+    for idx, (user_id, stats) in enumerate(sorted_users, 1):
+        user = await client.fetch_user(user_id)
+        leaderboard_msg += f"{idx}. {user.display_name} - Level {stats['level']} ({stats['xp']} XP)\n"
 
-# Command to reset a user's level (Admin only)
-@client.tree.command(name="reset_level", description="Reset a user's level")
-@app_commands.checks.has_permissions(administrator=True)
-async def reset_level(interaction: discord.Interaction, member: discord.Member):
-    user_id = str(member.id)
-    if user_id in levels:
-        del levels[user_id]
-        save_levels(levels)
-        await interaction.response.send_message(f"{member.display_name}'s level has been reset.")
+    await interaction.response.send_message(leaderboard_msg)
+
+### Error Handler for Commands ###
+@client.tree.error
+async def on_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
+
+
+def get_weather(city):
+  params = {
+      'q': city,
+      'appid': WEATHERKEY,
+      'units': 'metric'  # You can use 'imperial' for Fahrenheit
+  }
+  response = requests.get(BASE_URL, params=params)
+  return response.json()
+
+
+# Function to get the weather data
+def get_weather_data(city: str, units: str = 'metric'):
+    base_url = "http://api.openweathermap.org/data/2.5/weather"
+    params = {
+        'q': city,
+        'appid': WEATHERKEY,
+        'units': units
+    }
+
+    response = requests.get(base_url, params=params)
+
+    if response.status_code == 200:
+        return response.json()
     else:
-        await interaction.response.send_message(f"{member.display_name} has no XP to reset.")
+        return None
 
-# Command to manually add XP to a user (Admin only)
-@client.tree.command(name="addxp", description="Manually add XP to a user")
-@app_commands.checks.has_permissions(administrator=True)
-async def addxp(interaction: discord.Interaction, member: discord.Member, xp: int):
-    leveled_up = add_xp(member.id, xp)
-    await interaction.response.send_message(f"Added {xp} XP to {member.display_name}.")
+# Function to convert Unix time to a readable format
+def unix_to_readable_time(unix_time: int):
+    return datetime.utcfromtimestamp(unix_time).strftime('%Y-%m-%d %H:%M:%S UTC')
 
-    if leveled_up:
-        await interaction.followup.send(f"🎉 {member.mention} leveled up to level {leveled_up}!")
+# Weather Command
+@client.tree.command(name="weather", description="Get the current weather for a city.")
+@app_commands.describe(city="Enter the city", units="Temperature unit (Celsius or Fahrenheit)")
+async def weather_command(interaction: discord.Interaction, city: str, units: str = 'Celsius'):
+    units = 'imperial' if units.lower() == 'fahrenheit' else 'metric'
+    data = get_weather_data(city, units)
 
-# Save levels periodically
-@tasks.loop(minutes=10)
-async def periodic_save():
-    save_levels(levels)
+    if data:
+        # Extracting necessary data
+        city_name = data['name']
+        country_code = data['sys']['country']
+        weather_desc = data['weather'][0]['description'].title()
+        temp = data['main']['temp']
+        feels_like = data['main']['feels_like']
+        humidity = data['main']['humidity']
+        pressure = data['main']['pressure']
+        wind_speed = data['wind']['speed']
+        visibility = data.get('visibility', 'N/A') / 1000  # Convert meters to kilometers
+        icon = data['weather'][0]['icon']
+        sunrise = unix_to_readable_time(data['sys']['sunrise'])
+        sunset = unix_to_readable_time(data['sys']['sunset'])
 
-# Define the ID of the logging channel
-LOGGING_CHANNEL_ID = # Insert your own logging channel ID
-
-# Utility function to get the logging channel
-async def get_logging_channel(guild):
-    return discord.utils.get(guild.text_channels, id=LOGGING_CHANNEL_ID)
-
-# EVENT LISTENERS 
-
-# Log message deletions
-@client.event
-async def on_message_delete(message):
-    if message.guild:
-        log_channel = await get_logging_channel(message.guild)
-        if log_channel:
-            embed = discord.Embed(
-                title="Message Deleted",
-                description=f"Message by {message.author.mention} in {message.channel.mention} was deleted.",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="Content", value=message.content or "No content", inline=False)
-            embed.set_footer(text=f"User ID: {message.author.id} | Message ID: {message.id}")
-            await log_channel.send(embed=embed)
-
-# Log message edits
-@client.event
-async def on_message_edit(before, after):
-    if before.guild:
-        log_channel = await get_logging_channel(before.guild)
-        if log_channel and before.content != after.content:
-            embed = discord.Embed(
-                title="Message Edited",
-                description=f"Message by {before.author.mention} in {before.channel.mention} was edited.",
-                color=discord.Color.orange()
-            )
-            embed.add_field(name="Before", value=before.content or "No content", inline=False)
-            embed.add_field(name="After", value=after.content or "No content", inline=False)
-            embed.set_footer(text=f"User ID: {before.author.id} | Message ID: {before.id}")
-            await log_channel.send(embed=embed)
-
-# Log member join
-@client.event
-async def on_member_join(member):
-    log_channel = await get_logging_channel(member.guild)
-    if log_channel:
+        # Create an embed with the weather information
         embed = discord.Embed(
-            title="Member Joined",
-            description=f"{member.mention} has joined the server.",
-            color=discord.Color.green()
+            title=f"Weather in {city_name}, {country_code}",
+            color=discord.Color.blue(),
+            description=f"**{weather_desc}**"
         )
-        embed.set_footer(text=f"User ID: {member.id}")
-        await log_channel.send(embed=embed)
+        embed.set_thumbnail(url=f"http://openweathermap.org/img/wn/{icon}.png")
 
-# Log member leave
-@client.event
-async def on_member_remove(member):
-    log_channel = await get_logging_channel(member.guild)
-    if log_channel:
-        embed = discord.Embed(
-            title="Member Left",
-            description=f"{member.mention} has left the server.",
-            color=discord.Color.red()
-        )
-        embed.set_footer(text=f"User ID: {member.id}")
-        await log_channel.send(embed=embed)
+        # Adding weather fields
+        embed.add_field(name="Temperature", value=f"{temp}°{'C' if units == 'metric' else 'F'}", inline=True)
+        embed.add_field(name="Feels Like", value=f"{feels_like}°{'C' if units == 'metric' else 'F'}", inline=True)
+        embed.add_field(name="Humidity", value=f"{humidity}%", inline=True)
+        embed.add_field(name="Pressure", value=f"{pressure} hPa", inline=True)
+        embed.add_field(name="Visibility", value=f"{visibility} km", inline=True)
+        embed.add_field(name="Wind Speed", value=f"{wind_speed} m/s", inline=True)
+        embed.add_field(name="Sunrise", value=sunrise, inline=True)
+        embed.add_field(name="Sunset", value=sunset, inline=True)
 
-# Log member bans
-@client.event
-async def on_member_ban(guild, member):
-    log_channel = await get_logging_channel(guild)
-    if log_channel:
-        embed = discord.Embed(
-            title="Member Banned",
-            description=f"{member.mention} was banned from the server.",
-            color=discord.Color.dark_red()
-        )
-        embed.set_footer(text=f"User ID: {member.id}")
-        await log_channel.send(embed=embed)
+        embed.set_footer(text="Weather data provided by OpenWeatherMap")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# Log member unbans
-@client.event
-async def on_member_unban(guild, user):
-    log_channel = await get_logging_channel(guild)
-    if log_channel:
-        embed = discord.Embed(
-            title="Member Unbanned",
-            description=f"{user.mention} was unbanned from the server.",
-            color=discord.Color.green()
-        )
-        embed.set_footer(text=f"User ID: {user.id}")
-        await log_channel.send(embed=embed)
+    else:
+        await interaction.response.send_message(f"Could not retrieve weather data for **{city}**. Please check the city name and try again.", ephemeral=True)
 
-# Log role updates
-@client.event
-async def on_member_update(before, after):
-    if before.guild:
-        log_channel = await get_logging_channel(before.guild)
-        if log_channel:
-            if before.roles != after.roles:
-                embed = discord.Embed(
-                    title="Roles Updated",
-                    description=f"{before.mention}'s roles were updated.",
-                    color=discord.Color.blue()
-                )
-                embed.add_field(name="Before", value=", ".join([role.name for role in before.roles]), inline=False)
-                embed.add_field(name="After", value=", ".join([role.name for role in after.roles]), inline=False)
-                embed.set_footer(text=f"User ID: {before.id}")
-                await log_channel.send(embed=embed)
 
-# Log channel creation
-@client.event
-async def on_guild_channel_create(channel):
-    log_channel = await get_logging_channel(channel.guild)
-    if log_channel:
-        embed = discord.Embed(
-            title="Channel Created",
-            description=f"A new channel {channel.mention} was created.",
-            color=discord.Color.green()
-        )
-        embed.set_footer(text=f"Channel ID: {channel.id}")
-        await log_channel.send(embed=embed)
+# Autocomplete for city names (Optional: Requires a list of cities)
+@weather_command.autocomplete('city')
+async def city_autocomplete(interaction: discord.Interaction, current: str):
+    cities = ["New York", "Los Angeles", "London", "Tokyo", "Paris", "Berlin", "Sydney", "Edinburgh"]
+    # Return city suggestions that match the current input
+    return [app_commands.Choice(name=city, value=city) for city in cities if current.lower() in city.lower()]
 
-# Log channel deletion
-@client.event
-async def on_guild_channel_delete(channel):
-    log_channel = await get_logging_channel(channel.guild)
-    if log_channel:
-        embed = discord.Embed(
-            title="Channel Deleted",
-            description=f"The channel {channel.name} was deleted.",
-            color=discord.Color.red()
-        )
-        embed.set_footer(text=f"Channel ID: {channel.id}")
-        await log_channel.send(embed=embed)
 
-# Log channel updates
-@client.event
-async def on_guild_channel_update(before, after):
-    log_channel = await get_logging_channel(before.guild)
-    if log_channel:
-        embed = discord.Embed(
-            title="Channel Updated",
-            description=f"The channel {before.mention} was updated.",
-            color=discord.Color.blue()
-        )
-        if before.name != after.name:
-            embed.add_field(name="Old Name", value=before.name, inline=False)
-            embed.add_field(name="New Name", value=after.name, inline=False)
-        await log_channel.send(embed=embed)
 
 # Ping Command
 
@@ -304,6 +259,29 @@ async def ping(interaction: discord.Interaction):
     embed = discord.Embed(title="ARL Bot ping")
     embed.add_field(name="Bot ping", value=f"{round(client.latency * 1000)}ms")
     await interaction.response.send_message(embed=embed, ephemeral = True)
+
+@client.tree.command(name='eval', description='Evaluates Python code or executes a command')
+async def eval_command(interaction: discord.Interaction, code: str):
+    # Check if the author is the owner
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
+
+    # Prepare the code for execution
+    code = code.strip('`')  # Strip backticks if present
+
+    try:
+        # Define an async wrapper with local context
+        exec(
+            f'async def _eval_wrapper(interaction): ' + ''.join(f'\n {line}' for line in code.split('\n'))
+        )
+
+        # Execute the async wrapper and pass the interaction into it
+        await locals()['_eval_wrapper'](interaction)
+
+        await interaction.response.send_message(f"Executed: `{code}`", ephemeral=True)
+    except Exception as e:
+        # Send the error message in case of failure
+        await interaction.response.send_message(f'Error: {str(e)}', ephemeral=True)
 
 # Give role command
 
@@ -333,21 +311,6 @@ async def removerole(interaction: discord.Interaction, member: discord.Member, r
 async def fshub(interaction: discord.Interaction):
      await interaction.response.send_message("The link to our FsHub airline is https://fshub.io/airline/FCA/overview", ephemeral=True)   
 
-# User info Command
-
-@client.tree.command(description = "get the info of a user")
-@app_commands.describe(member = "Which user am i getting the info for?")
-async def userinfo(interaction: discord.Interaction, member: discord.Member):
-        embed = discord.Embed(title=f"Userinfo for {member.name}", 
-              description=f"this is the user info for {member.mention}")
-        embed.add_field(name="joined server at:",
-                        value=member.joined_at.strftime("%d/%m/%y, %H:%M:%S")
-                        if member.joined_at else "Not available")
-        embed.add_field(name="joined discord at:", 
-                        value=member.created_at.strftime("%d/%m/%y, %H:%M:%S"))
-        embed.add_field(name="User ID",
-                        value= f"their id is {member.id}")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # Role delete command
 
@@ -384,6 +347,58 @@ async def kick(interaction: discord.Interaction, user: discord.User, reason:str)
   except discord.Forbidden:
     await interaction.response.send_message('I do not have permission' 
     'to kick this user', ephemeral=True)
+
+@client.tree.command(name="roles", description="List all roles in the server.")
+async def roles(interaction: discord.Interaction):
+    roles = [role.mention for role in interaction.guild.roles if role.name != "@everyone"]
+    await interaction.response.send_message(f"Roles in {interaction.guild.name}: {', '.join(roles)}")
+
+# Utility: Get bot uptime
+start_time = datetime.utcnow()
+
+@client.tree.command(name="uptime", description="Check how long the bot has been running.")
+async def uptime(interaction: discord.Interaction):
+    now = datetime.utcnow()
+    uptime_duration = now - start_time
+    days, remainder = divmod(int(uptime_duration.total_seconds()), 86400)
+    hours, remainder = divmod(int(uptime_duration.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    await interaction.response.send_message(f"I have been online for {days}d {hours}h {minutes}m {seconds}s")
+
+@client.tree.command(name="userinfo", description="Get information about a user.")
+async def userinfo(interaction: discord.Interaction, member: discord.Member = None):
+    if member is None:
+        member = interaction.user
+
+    roles = [role.mention for role in member.roles if role.name != "@everyone"]
+    joined_at = member.joined_at.strftime("%Y-%m-%d %H:%M:%S")
+    created_at = member.created_at.strftime("%Y-%m-%d %H:%M:%S")
+
+    embed = discord.Embed(title=f"User Info: {member}", color=discord.Color.green())
+    embed.add_field(name="ID", value=member.id, inline=True)
+    embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+    embed.add_field(name="Joined", value=joined_at, inline=True)
+    embed.add_field(name="Account Created", value=created_at, inline=False)
+    embed.add_field(name="Roles", value=", ".join(roles), inline=False)
+    embed.set_thumbnail(url=member.avatar.url)
+
+    await interaction.response.send_message(embed=embed)
+
+@client.tree.command(name="serverinfo", description="Get information about the server.")
+async def server_info(interaction: discord.Interaction):
+    server = interaction.guild
+    num_channels = len(server.channels)
+    num_members = server.member_count
+    creation_date = server.created_at.strftime("%Y-%m-%d %H:%M:%S")
+
+    embed = discord.Embed(title=f"Server Info: {server.name}", color=discord.Color.blue())
+    embed.add_field(name="Server ID", value=server.id, inline=True)
+    embed.add_field(name="Members", value=num_members, inline=True)
+    embed.add_field(name="Channels", value=num_channels, inline=True)
+    embed.add_field(name="Creation Date", value=creation_date, inline=False)
+    embed.set_thumbnail(url=server.icon.url)
+
+    await interaction.response.send_message(embed=embed)
 
 # Ban command
 
@@ -431,14 +446,6 @@ async def warm(interaction: discord.Interaction, user: discord.User):
   await interaction.response.send_message(f"warmed {user.mention}")
   await user.send(f"You were warmed in FAC by {interaction.user}")
 
-# Warn command (is a moderation command)
-
-@app_commands.describe(user = "who should i warn?", reason = "Why am i warning them?")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def warn(interaction: discord.Interaction, user: discord.User, reason: str):
-    await interaction.response.send_message(f'I have warned {user} with the reason' 
-    f' {reason}', ephemeral = True)
-    await user.send(f"you were warned in FAC for {reason}")
 
 # Purge command
 
@@ -452,8 +459,7 @@ async def purge(interaction: discord.Interaction, amount: int):
     return
   if isinstance(interaction.channel, discord.TextChannel):
     await interaction.channel.purge(limit=amount)
-    await interaction.response.send_message(f"Cleared {amount} messages!"
-                                            , ephemeral=True)
+    await interaction.response.send_message(f"Cleared {amount} messages!", ephemeral=True)                               
   else:
     await interaction.response.send_message("This command only works in a text channel."
                                             , ephemeral=True)
@@ -505,11 +511,7 @@ async def slowmode(interaction: discord.Interaction, seconds: int):
     else:
         await interaction.response.send_message("Invalid time! Slowmode must be between 0 and 21600 seconds (6 hours).", ephemeral=True)
 
-# Error handler for slowmode command in case permissions are missing
-@slowmode.error
-async def slowmode_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.errors.MissingPermissions):
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+
 
 # Poll command
 
@@ -535,42 +537,425 @@ async def poll(interaction: discord.Interaction, question: str, option1: str, op
 
 @client.tree.command(description="Get the source code for the bot")
 async def code(interaction: discord.Interaction):
-  await interaction.response.send_message("The link to my source code is here: https://github.com/IndigoFire1847/FAC-Utilities/tree/main")
+  await interaction.response.send_message("The link to my source code is here (temporarily outdated): https://github.com/IndigoFire1847/FAC-Utilities/tree/main", ephemeral=True)
 
 # Handler for poll command if user doesn't have permissions
 
-@poll.error
-async def poll_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.errors.MissingPermissions):
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
 
-# Kick command handler if user doesn't have permissions
 
-@kick.error
-async def kick_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.errors.MissingPermissions):
-    await interaction.response.send_message("You don't have permission to kick users", ephemeral = True)
 
-# Ban command handler if user doesn't have permissions
+# Helper function to create paginated embeds
+def create_help_embeds():
+    commands_list = {
+        "/serverinfo": "Get information about the server.",
+        "/userinfo [member]": "Get information about a specific user or yourself.",
+        "/ping": "Check the bot's latency.",
+        "/kick [member] [reason]": "Kick a member from the server.",
+        "/ban [member] [reason]": "Ban a member from the server.",
+        "/clear [amount]": "Clear a number of messages from the channel.",
+        "/uptime": "Check how long the bot has been online.",
+        "/roles": "List all roles in the server.",
+        "/poll [question] [option1] [option2]": "Create a poll with two options."
+    }
 
-@ban.error
-async def ban_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.errors.MissingPermissions):
-    await interaction.response.send_message("You don't have permission to ban users", ephemeral = True)
+    # Split commands into pages, each page having up to 4 commands for easier reading
+    items_per_page = 4
+    pages = [list(commands_list.items())[i:i + items_per_page] for i in range(0, len(commands_list), items_per_page)]
 
-# Unban handler if user doesn't have permissions
+    embeds = []
+    for i, page in enumerate(pages):
+        embed = discord.Embed(title=f"Help - Command List (Page {i + 1}/{len(pages)})", color=discord.Color.blue())
+        for command, description in page:
+            embed.add_field(name=command, value=description, inline=False)
+        embed.set_footer(text="Use each command with the specified format.")
+        embeds.append(embed)
 
-@unban.error
-async def unban_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.errors.MissingPermissions):
-    await interaction.response.send_message("You don't have permission to unban users", ephemeral = True)
+    return embeds
 
-# Warn handler if user doesn't have permission
 
+# Define the Paginator View for buttons
+class HelpPaginator(discord.ui.View):
+    def __init__(self, embeds):
+        super().__init__(timeout=180)  # Set timeout for the paginator view (optional)
+        self.embeds = embeds
+        self.current_page = 0
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, disabled=True)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page -= 1
+        await self.update_buttons(interaction)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page += 1
+        await self.update_buttons(interaction)
+
+    async def update_buttons(self, interaction):
+        # Disable buttons based on the current page
+        if self.current_page == 0:
+            self.previous_button.disabled = True
+        else:
+            self.previous_button.disabled = False
+
+        if self.current_page == len(self.embeds) - 1:
+            self.next_button.disabled = True
+        else:
+            self.next_button.disabled = False
+
+        # Update the embed and the buttons
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+
+
+# Custom Help Command with Pagination
+@client.tree.command(name="help", description="Display a list of all commands with pagination.")
+async def help_command(interaction: discord.Interaction):
+    embeds = create_help_embeds()
+
+    # If only one page exists, just send the single embed without buttons
+    if len(embeds) == 1:
+        await interaction.response.send_message(embed=embeds[0])
+    else:
+        paginator = HelpPaginator(embeds)
+        await interaction.response.send_message(embed=embeds[0], view=paginator)
+
+# Path to the JSON file
+AFK_FILE_PATH = 'afk_statuses.json'
+
+# Load AFK statuses from JSON file
+def load_afk_statuses():
+    try:
+        with open(AFK_FILE_PATH, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}  # Return an empty dict if the file doesn't exist or is empty
+
+# Save AFK statuses to JSON file
+def save_afk_statuses(afk_statuses):
+    with open(AFK_FILE_PATH, 'w') as f:
+        json.dump(afk_statuses, f)
+
+# Load AFK statuses at startup
+afk_statuses = load_afk_statuses()
+
+# Command to set AFK status
+@client.tree.command(name="afk", description="Set your AFK status.")
+@app_commands.describe(reason="Optional reason for being AFK.")
+async def afk(interaction: discord.Interaction, reason: str = "No reason provided."):
+    user_id = str(interaction.user.id)  # Use string for JSON keys
+    afk_statuses[user_id] = reason  # Store AFK status with reason
+    save_afk_statuses(afk_statuses)  # Save to JSON
+    await interaction.response.send_message(f"You are now AFK: {reason}", ephemeral=True)
+
+# Event to handle message mentions
+@client.event
+async def on_message(message):
+    # Ignore messages from the bot itself
+    if message.author == client.user:
+        return
+
+    # Reload AFK statuses from JSON to ensure latest data
+    afk_statuses = load_afk_statuses()
+
+    # Check if any mentioned user is AFK
+    for user in message.mentions:
+        if str(user.id) in afk_statuses:
+            reason = afk_statuses[str(user.id)]
+            await message.reply(f"{user} is AFK: {reason}", mention_author = True)
+            await asyncio.sleep(5)
+            await message.delete()
+
+    # Process commands after handling mentions
+            await client.process_commands(message)
+
+# Command to remove AFK status
+@client.tree.command(name="back", description="Remove your AFK status.")
+async def deAFK(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    if user_id in afk_statuses:
+        del afk_statuses[user_id]  # Remove AFK status
+        save_afk_statuses(afk_statuses)  # Save to JSON
+        await interaction.response.send_message("You are now back!", ephemeral=True)
+    else:
+        await interaction.response.send_message("You are not AFK.", ephemeral=True)
+
+# File path to store the warnings
+WARNINGS_FILE = "warnings.json"
+
+# Load warnings from JSON file or create a new one
+def load_warnings():
+    if os.path.exists(WARNINGS_FILE):
+        with open(WARNINGS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+# Save warnings to the JSON file
+def save_warnings(warnings):
+    with open(WARNINGS_FILE, "w") as f:
+        json.dump(warnings, f, indent=4)
+
+# Initialize warnings dictionary from the file
+warnings = load_warnings()
+
+# List of prohibited words (you can customize this list)
+PROHIBITED_WORDS = ["cunt", "nigger", "nigga", "Koon"]
+
+# Dictionary to track user message timestamps for spam detection
+user_message_times = defaultdict(list)
+
+# Automod system to check messages for prohibited content and spam
+@client.event
+async def on_message(message):
+    if message.author == client.user:
+        return  # Ignore messages sent by the bot itself
+
+    user_id = str(message.author.id)
+
+    # Check for prohibited words
+    if any(word in message.content.lower() for word in PROHIBITED_WORDS):
+        await message.delete()       
+        await handle_warning(message.author, "Used prohibited word(s)", message.channel)
+
+
+    # Check for spam
+    current_time = time.time()
+    user_message_times[user_id].append(current_time)
+
+    # Keep only timestamps from the last 10 seconds (adjust as needed)
+    user_message_times[user_id] = [t for t in user_message_times[user_id] if current_time - t < 10]
+
+    # If the user sent more than 5 messages in the last 10 seconds, warn them
+    if len(user_message_times[user_id]) > 5:
+        await handle_warning(message.author, "Spamming messages", message.channel)
+
+async def handle_warning(user, reason, channel):
+    user_id = str(user.id)
+
+    if user_id not in warnings:
+        warnings[user_id] = []
+
+    warnings[user_id].append(reason)
+
+    # Save the updated warnings to the file
+    save_warnings(warnings)
+
+    # Check if the user has reached 4 warnings
+    if len(warnings[user_id]) >= 4:
+        try:
+            # Kick the user and reset their warnings
+            await user.kick(reason="Reached 4 warnings")
+            warnings[user_id] = []
+            save_warnings(warnings)  # Save the reset warnings
+            await channel.send(f'{user.mention} has been kicked for reaching 4 warnings due to spamming or prohibited words.')
+        except discord.Forbidden:
+            await channel.send("I do not have permission to kick this user.")
+    else:
+        await channel.send(f'{user.mention}, you have been warned for {reason}. You now have {len(warnings[user_id])} warning(s).')
+        await user.send(f'You have been warned in {channel.guild.name} for {reason}. You have {len(warnings[user_id])} warning(s).')
+
+# Command to issue a warning to a user
+@client.tree.command(name="warn", description="Warn a user for a specific reason")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if member.bot:
+        await interaction.response.send_message("You cannot warn a bot.", ephemeral=True)
+        return
+
+    user_id = str(member.id)  # Store user ID as string for JSON compatibility
+
+    if user_id not in warnings:
+        warnings[user_id] = []
+
+    warnings[user_id].append(reason)
+
+    # Save the updated warnings to the file
+    save_warnings(warnings)
+
+    # Check if the user has reached 4 warnings
+    if len(warnings[user_id]) >= 4:
+        try:
+            # Kick the user and reset their warnings
+            await member.kick(reason="Reached 4 warnings")
+            warnings[user_id] = []
+            save_warnings(warnings)  # Save the reset warnings
+            await interaction.response.send_message(f'{member.mention} has been kicked for reaching 4 warnings.')
+        except discord.Forbidden:
+            await interaction.response.send_message("I do not have permission to kick this user.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f'{member.mention} has been warned. Reason: {reason}')
+        await member.send(f'You have been warned in {interaction.guild.name} for: {reason}. You have {len(warnings[user_id])} warning(s).')
+
+
+# Command to view warnings of a user
+@client.tree.command(name="warnings", description="View warnings for a user")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def view_warnings(interaction: discord.Interaction, member: discord.Member):
+    user_id = str(member.id)
+    if user_id in warnings and warnings[user_id]:
+        warn_list = '\n'.join([f"{i + 1}. {w}" for i, w in enumerate(warnings[user_id])])
+        await interaction.response.send_message(f'{member.mention} has the following warnings:\n{warn_list}')
+    else:
+        await interaction.response.send_message(f'{member.mention} has no warnings.')
+
+
+# Command to clear warnings of a user
+@client.tree.command(name="clearwarnings", description="Clear all warnings for a user")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def clear_warnings(interaction: discord.Interaction, member: discord.Member):
+    user_id = str(member.id)
+    if user_id in warnings:
+        warnings[user_id] = []
+        save_warnings(warnings)  # Save changes to the file
+        await interaction.response.send_message(f'Warnings for {member.mention} have been cleared.')
+    else:
+        await interaction.response.send_message(f'{member.mention} has no warnings to clear.')
+
+
+# Error handling for missing permissions
 @warn.error
-async def warn_error(interaction: discord.Interaction, error):
-  if isinstance(error, app_commands.errors.MissingPermissions):
-    await interaction.response.send_message("You don't have permission to warn users", ephemeral = True)
+@view_warnings.error
+@clear_warnings.error
+async def permissions_error(interaction: discord.Interaction, error):
+    if isinstance(error, discord.app_commands.MissingPermissions):
+        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
 
 
-client.run(Your Token Here)
+# The channel ID where applications will be sent
+APPLICATION_CHANNEL_ID = 1297064864006537236  # Replace with your channel ID
+
+# Time (in seconds) before the bot stops waiting for a response
+TIMEOUT_DURATION = 60  
+
+async def ask_question(interaction, question):
+    """Helper function to ask a question and wait for a user's response."""
+    await interaction.followup.send(question)
+
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel
+
+    try:
+        msg = await client.wait_for('message', check=check, timeout=TIMEOUT_DURATION)
+        return msg.content
+    except asyncio.TimeoutError:
+        await interaction.followup.send("You took too long to respond!", ephemeral=True)
+        return None
+
+@client.tree.command(name="apply_mod", description="Apply for moderator role")
+@app_commands.checks.has_permissions(administrator=True)
+async def apply_mod(interaction: discord.Interaction):
+    """Handles moderator application process with multiple questions."""
+    await interaction.response.defer(ephemeral=True)
+
+    # Ask first question
+    question1 = "Why do you want to become a moderator?"
+    response1 = await ask_question(interaction, question1)
+    if response1 is None:
+        return  # User did not respond in time
+
+    # Ask second question
+    question2 = "What experience do you have moderating other servers?"
+    response2 = await ask_question(interaction, question2)
+    if response2 is None:
+        return
+
+    # Ask third question
+    question3 = "How many hours can you dedicate per week?"
+    response3 = await ask_question(interaction, question3)
+    if response3 is None:
+        return
+
+    # Ask fourth question
+    question4 = "How do you handle conflict with other members in a team?"
+    response4 = await ask_question(interaction, question4)
+    if response4 is None:
+        return
+
+    # Ask fifth question
+    question5 = "What would you do if you notice someone breaking the server rules?"
+    response5 = await ask_question(interaction, question5)
+    if response5 is None:
+        return
+
+    # Ask sixth question
+    question6 = "Tell us about a time when you had to manage a difficult situation."
+    response6 = await ask_question(interaction, question6)
+    if response6 is None:
+        return
+
+    # Ask seventh question
+    question7 = "Do you have any other commitments that might interfere with your ability to moderate?"
+    response7 = await ask_question(interaction, question7)
+    if response7 is None:
+        return
+
+    # If all questions were answered, send the application to the application channel
+    application_channel = client.get_channel(APPLICATION_CHANNEL_ID)
+
+    if application_channel is None:
+        await interaction.followup.send("The application channel is not set up correctly.", ephemeral=True)
+        return
+
+    # Create an embed for the application
+    embed = discord.Embed(title="New Moderator Application", color=discord.Color.blue())
+    embed.add_field(name="Applicant", value=interaction.user.mention, inline=True)
+    embed.add_field(name="Why do you want to become a moderator?", value=response1, inline=False)
+    embed.add_field(name="Previous moderation experience?", value=response2, inline=False)
+    embed.add_field(name="Weekly availability", value=response3, inline=False)
+    embed.add_field(name="Handling team conflict?", value=response4, inline=False)
+    embed.add_field(name="Action on rule-breaking?", value=response5, inline=False)
+    embed.add_field(name="Difficult situation management?", value=response6, inline=False)
+    embed.add_field(name="Other commitments?", value=response7, inline=False)
+    embed.set_footer(text=f"Applied on: {interaction.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Send the embed to the application channel
+    await application_channel.send(embed=embed)
+    await interaction.followup.send("Your application has been submitted!", ephemeral=True)
+
+# Define the counting channel ID and initialize the current count
+COUNTING_CHANNEL_ID = 1297083592815673344  # Replace with your actual channel ID
+current_count = 0
+
+# Event to handle counting in the specified channel
+@client.event
+async def on_message(message):
+    global current_count
+    
+    if message.channel.id == COUNTING_CHANNEL_ID and not message.author.bot:
+        try:
+            # Try to parse the message content as an integer
+            count = int(message.content)
+            if count == current_count + 1:
+                # If the count is correct, update the current count
+                current_count = count
+                client_message = await message.reply(f'✅ Correct! The current count is now {current_count}.')
+                await asyncio.sleep(5)
+                await client_message.delete()
+            else:
+                # If the count is incorrect, notify the user and optionally delete the message
+                client_message = await message.reply(f'❌ Wrong count! The count should be {current_count + 1}.')
+                await asyncio.sleep(5)
+                await message.delete()
+                await client_message.delete()
+        except ValueError:
+            # If the message is not a valid number, notify the user and optionally delete the message
+            client_message = await message.reply('❌ Please enter a valid number.')
+            await asyncio.sleep(5)
+            await message.delete()
+            await client_message.delete()
+    # Ensure other commands still work
+    await client.process_commands(message)
+
+# Slash command to reset the count, restricted to users with manage_messages permission
+@client.tree.command(name='reset', description='Reset the counting channel')
+@app_commands.checks.has_permissions(manage_messages=True)
+async def reset_count(interaction: discord.Interaction):
+    global current_count
+    current_count = 13
+    await interaction.response.send_message('The counting has been reset!', ephemeral=True)
+
+# Slash command to get the current count
+@client.tree.command(name='count', description='Get the current count')
+async def current_count_command(interaction: discord.Interaction):
+    await interaction.response.send_message(f'The current count is {current_count}.', ephemeral=True)
+
+ 
+client.run(TOKEN)
